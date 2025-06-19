@@ -1,51 +1,82 @@
+import express from "express";
+import multer from "multer";
+import fs from "fs";
+import { parse } from "fast-csv";
+
 import { login } from "./api/login.js";
-import { getFlows } from "./api/getFlows.js";
 import { saveRegistroCab } from "./api/saveCab.js";
 import { saveRegistroCuerpo } from "./api/saveCuerpo.js";
 
-async function main() {
-  const user = await login();
-  const token = user.access_token;
-  console.log("Login OK", user);
+const app = express();
+const upload = multer({ dest: 'uploads/' }); // carpeta temporal para multer
 
-  const flows = await getFlows(token);
-  console.log("Flows:", flows);
+app.post('/import-csv', upload.single('file'), async (req, res) => {
+  try {
+    const user = await login();
+    const token = user.access_token;
+    console.log("Login OK", user);
 
-  const cabeceraData = {
-    flowid: 11013,
-    referenciatexto: "eliminarImport",
-    clientid: 826,
-    clientname: "RIVAROSA S.A",
-    cuerpos: [],
-    currentuser: 38,
-    fecha: "2025-06-04",
-    statusid: 1660,
-    vendedorid: 358,
-    xlatitud: -32.3846144,
-    xlongitud: -63.258624,
-    statusflowid: 618,
-    totalprecio: 1,
-    totalimpuestos: 1,
-  };
+    const results = [];
 
-  const cabResponse = await saveRegistroCab(cabeceraData, token);
-  console.log("Registro cab guardado:", cabResponse);
+    fs.createReadStream(req.file.path)
+      .pipe(parse({ headers: true, delimiter: ',' }))
+      .on('error', error => {
+        console.error("Error leyendo CSV:", error);
+        res.status(500).json({ error: "Error leyendo CSV" });
+      })
+      .on('data', row => {
+        results.push(row);
+      })
+      .on('end', async (rowCount) => {
+        console.log(`Se procesaron ${rowCount} filas`);
 
-  const cuerpoData = {
-    presupcabid: cabResponse.id, // Este sí, porque ya lo tenemos después de guardar el cab
-    articulo: "SATTO",
-    articulodepositoid: 2292,
-    cantidad: 1,
-    preciounit: 1,
-    preciototal: 1,
-    cuerpoflowid: 11013,
-    cuerpostatusid: 1660,
-    xlatitud: -32.3846144,
-    xlongitud: -63.258624,
-  };
+        for (const row of results) {
+          const cabeceraData = {
+            flowid: parseInt(row.flowid),
+            referenciatexto: row.referenciatexto,
+            clientid: parseInt(row.clientid),
+            clientname: row.clientname,
+            cuerpos: [],
+            currentuser: parseInt(row.currentuser),
+            fecha: row.fecha,
+            statusid: parseInt(row.statusid),
+            vendedorid: parseInt(row.vendedorid),
+            xlatitud: parseFloat(row.xlatitud),
+            xlongitud: parseFloat(row.xlongitud),
+            statusflowid: parseInt(row.statusflowid),
+            totalprecio: parseFloat(row.totalprecio),
+            totalimpuestos: parseFloat(row.totalimpuestos),
+          };
 
-  const cuerpoResponse = await saveRegistroCuerpo(cuerpoData, token);
-  console.log("Registro cuerpo guardado:", cuerpoResponse);
-}
+          const cabResponse = await saveRegistroCab(cabeceraData, token);
+          console.log("Cabecera guardada:", cabResponse);
 
-main();
+          const cuerpoData = {
+            presupcabid: cabResponse.id,
+            articulo: row.articulo,
+            articulodepositoid: parseInt(row.articulodepositoid),
+            cantidad: parseFloat(row.cantidad),
+            preciounit: parseFloat(row.preciounit),
+            preciototal: parseFloat(row.preciototal),
+            cuerpoflowid: parseInt(row.cuerpoflowid),
+            cuerpostatusid: parseInt(row.cuerpostatusid),
+            xlatitud: parseFloat(row.xlatitud),
+            xlongitud: parseFloat(row.xlongitud),
+          };
+
+          const cuerpoResponse = await saveRegistroCuerpo(cuerpoData, token);
+          console.log("Cuerpo guardado:", cuerpoResponse);
+        }
+
+        // Borrar archivo CSV temporal
+        fs.unlinkSync(req.file.path);
+        res.status(200).json({ message: "CSV procesado correctamente" });
+      });
+
+  } catch (error) {
+    console.error("Error procesando CSV:", error);
+    res.status(500).json({ error: "Error procesando CSV" });
+  }
+});
+
+app.listen(3000, () => console.log('Servidor corriendo en puerto 3000'));

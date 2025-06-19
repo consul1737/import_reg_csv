@@ -1,1 +1,30 @@
+# Node.js
 node_modules/
+dist/
+uploads/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración de compiladores/builders
+*.yml
+
+# Archivos de paquetes
+package-lock.json
+
+# Output de Electron (ejecutable generado)
+importador-registros-win32-x64/
+win-unpacked/
+
+# Otros temporales o de desarrollo
+.env
+*.log
+
+# Visual Studio Code
+.vscode/
