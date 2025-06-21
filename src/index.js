@@ -1,4 +1,4 @@
-import express from "express";
+import express, { raw } from "express";
 import multer from "multer";
 import fs from "fs";
 import { parse } from "fast-csv";
@@ -6,6 +6,9 @@ import { parse } from "fast-csv";
 import { login } from "./api/login.js";
 import { saveRegistroCab } from "./api/saveCab.js";
 import { saveRegistroCuerpo } from "./api/saveCuerpo.js";
+import { getArticulos } from './api/getArticulos.js';
+import { getArticuloDeposito } from './api/getArticuloDeposito.js';
+import { buscarArticuloId } from './services.js/articuloHelper.js';
 
 const app = express();
 const upload = multer({ dest: 'uploads/' }); // carpeta temporal para multer
@@ -30,38 +33,74 @@ app.post('/import-csv', upload.single('file'), async (req, res) => {
       .on('end', async (rowCount) => {
         console.log(`Se procesaron ${rowCount} filas`);
 
+        const flowid = 11013;
+        const statusflowid = 618;
+        const referenciatexto = "telepase"; 
+
         for (const row of results) {
+          
+
+
           const cabeceraData = {
-            flowid: parseInt(row.flowid),
-            referenciatexto: row.referenciatexto,
-            clientid: parseInt(row.clientid),
+            flowid: flowid,
+            referenciatexto: referenciatexto,
             clientname: row.clientname,
-            cuerpos: [],
             currentuser: parseInt(row.currentuser),
             fecha: row.fecha,
             statusid: parseInt(row.statusid),
-            vendedorid: parseInt(row.vendedorid),
-            xlatitud: parseFloat(row.xlatitud),
-            xlongitud: parseFloat(row.xlongitud),
-            statusflowid: parseInt(row.statusflowid),
+            statusflowid: statusflowid,
             totalprecio: parseFloat(row.totalprecio),
             totalimpuestos: parseFloat(row.totalimpuestos),
           };
 
+
+          // 🕵️ LOG: Verificar si referenciatexto está bien cargado
+          console.log("DEBUG: cabeceraData.referenciatexto =", cabeceraData.referenciatexto);
+
+          // Enviás al backend (por ejemplo, a saveRegistroCab)
           const cabResponse = await saveRegistroCab(cabeceraData, token);
           console.log("Cabecera guardada:", cabResponse);
+         
+          const rc =  -1
+          const statusId = 1660;
+          
+         const art = {
+          pattern : row.articulo,
+          rcabidPadre : rc ,
+          statusId : statusId
+         }
 
+          console.log("DEBUG: Artículos a buscar:", art);
+          const articulos = await getArticulos(art, token);
+          console.log("DEBUG: Articulos obtenidos:", articulos);
+
+             
+          const depositoData = {
+            id: articulos.rows[0].id,
+            rcabidPadre : rc,
+            statusId : statusId  
+          };
+          
+
+          console.log("DEBUG: deposito a buscar:", depositoData);
+          const articulosDeposito = await getArticuloDeposito(depositoData, token);
+          console.log("Articulos en deposito:", articulosDeposito);
+          // Buscar el ID del artículo y del depósito 
+
+       const articuloId = buscarArticuloId(articulos.rows, row.articulo);
+       const primerStock = articulosDeposito.rows.stock[0];
+       if (!primerStock) throw new Error("No hay stock disponible para este artículo");
+       const depositoId = primerStock.id;
+       //const depositoId = buscarArticuloDepositoId(articulosDeposito.rows, articuloId);
           const cuerpoData = {
             presupcabid: cabResponse.id,
             articulo: row.articulo,
-            articulodepositoid: parseInt(row.articulodepositoid),
+            articulodepositoid: primerStock.id, // Usar el primer depósito disponible
             cantidad: parseFloat(row.cantidad),
             preciounit: parseFloat(row.preciounit),
             preciototal: parseFloat(row.preciototal),
             cuerpoflowid: parseInt(row.cuerpoflowid),
             cuerpostatusid: parseInt(row.cuerpostatusid),
-            xlatitud: parseFloat(row.xlatitud),
-            xlongitud: parseFloat(row.xlongitud),
           };
 
           const cuerpoResponse = await saveRegistroCuerpo(cuerpoData, token);
