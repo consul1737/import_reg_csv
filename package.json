@@ -18,20 +18,34 @@
   "devDependencies": {
     "@electron/packager": "^18.3.6",
     "electron": "^36.4.0",
-    "electron-builder": "^24.14.1"
+    "electron-builder": "^24.14.1",
+    "electron-updater": "^5.3.0"
   },
   "build": {
     "appId": "com.tuempresa.importadorregistros",
     "productName": "Importador Registros",
     "files": [
-      "**/*"
+      "!node_modules/.cache",
+      "!dist",
+      "!uploads",
+      "src/**/*",
+      "main.js",
+      "package.json",
+      "build/**/*"
     ],
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": "nsis",
-      "icon": "logo-solo.ico"
-    }
+      "icon": "build/logo-solo.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "consul1737",
+        "repo": "importador_csv"
+      }
+    ]
   }
 }

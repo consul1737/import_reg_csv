@@ -2,13 +2,14 @@ import express, { raw } from "express";
 import multer from "multer";
 import fs from "fs";
 import { parse } from "fast-csv";
-
 import { login } from "./api/login.js";
 import { saveRegistroCab } from "./api/saveCab.js";
 import { saveRegistroCuerpo } from "./api/saveCuerpo.js";
 import { getArticulos } from './api/getArticulos.js';
 import { getArticuloDeposito } from './api/getArticuloDeposito.js';
 import { buscarArticuloId } from './services.js/articuloHelper.js';
+import { getPerfilPorIdentificador } from './api/getPerfilIPoridentificador.js';
+import { formatearFecha } from "./services.js/fechaHelper.js";    
 
 const app = express();
 const upload = multer({ dest: 'uploads/' }); // carpeta temporal para multer
@@ -33,79 +34,86 @@ app.post('/import-csv', upload.single('file'), async (req, res) => {
       .on('end', async (rowCount) => {
         console.log(`Se procesaron ${rowCount} filas`);
 
+        console.log("DEBUG: Resultados del CSV:", results);
+
         const flowid = 11013;
         const statusflowid = 618;
         const referenciatexto = "telepase"; 
+        const rc =  -1
+        const statusId = 1660
+        const cuerpoflowid = 11013; // Completar según necesidad
+        
 
         for (const row of results) {
-          
+  const perfilData = {
+    identificador: row['Concesion'],
+    statusId: statusId
+  };
+  console.log("DEBUG: Perfil a buscar:", perfilData);
+  const perfilResponse = await getPerfilPorIdentificador(perfilData, token);
+  console.log("DEBUG: Perfil obtenido:", perfilResponse);
+  const perfil = perfilResponse.rows[0];
+  const fechaFormateada = formatearFecha(row['Fecha']);
 
+  const cabeceraData = {
+    flowid: flowid,
+    referenciatexto: referenciatexto,
+    clientid: perfil.id,
+    clientname: perfil.identificador,
+    currentuser: 1, // Definí quién carga esto o de dónde sale
+    obsprodd: row['Dominio'], // Dominio del vehículo
+    fecha: fechaFormateada,
+    statusid: statusId,
+    statusflowid: statusflowid,
+  };
 
-          const cabeceraData = {
-            flowid: flowid,
-            referenciatexto: referenciatexto,
-            clientname: row.clientname,
-            currentuser: parseInt(row.currentuser),
-            fecha: row.fecha,
-            statusid: parseInt(row.statusid),
-            statusflowid: statusflowid,
-            totalprecio: parseFloat(row.totalprecio),
-            totalimpuestos: parseFloat(row.totalimpuestos),
-          };
+  console.log("DEBUG: cabeceraData:", cabeceraData);
+  const cabResponse = await saveRegistroCab(cabeceraData, token);
+  console.log("Cabecera guardada:", cabResponse);
 
+  const art = {
+    pattern: row['Estación'],
+    rcabidPadre: rc,
+    statusId: statusId
+  };
 
-          // 🕵️ LOG: Verificar si referenciatexto está bien cargado
-          console.log("DEBUG: cabeceraData.referenciatexto =", cabeceraData.referenciatexto);
+  console.log("DEBUG: Artículos a buscar:", art);
+  const articulos = await getArticulos(art, token);
+  console.log("DEBUG: Articulos obtenidos:", articulos);
 
-          // Enviás al backend (por ejemplo, a saveRegistroCab)
-          const cabResponse = await saveRegistroCab(cabeceraData, token);
-          console.log("Cabecera guardada:", cabResponse);
-         
-          const rc =  -1
-          const statusId = 1660;
-          
-         const art = {
-          pattern : row.articulo,
-          rcabidPadre : rc ,
-          statusId : statusId
-         }
+  const depositoData = {
+    id: articulos.rows[0].id,
+    rcabidPadre: rc,
+    statusId: statusId  
+  };
 
-          console.log("DEBUG: Artículos a buscar:", art);
-          const articulos = await getArticulos(art, token);
-          console.log("DEBUG: Articulos obtenidos:", articulos);
+  console.log("DEBUG: deposito a buscar:", depositoData);
+  const articulosDeposito = await getArticuloDeposito(depositoData, token);
+  console.log("Articulos en deposito:", articulosDeposito);
 
-             
-          const depositoData = {
-            id: articulos.rows[0].id,
-            rcabidPadre : rc,
-            statusId : statusId  
-          };
-          
+  const articuloId = buscarArticuloId(articulos.rows, row['Estación']);
+  const primerStock = articulosDeposito.rows.stock[0];
+  if (!primerStock) throw new Error("No hay stock disponible para este artículo");
 
-          console.log("DEBUG: deposito a buscar:", depositoData);
-          const articulosDeposito = await getArticuloDeposito(depositoData, token);
-          console.log("Articulos en deposito:", articulosDeposito);
-          // Buscar el ID del artículo y del depósito 
+  const cuerpoData = {
+    presupcabid: cabResponse.id,
+    articulo: row['Estación'],
+    articulodepositoid: primerStock.id,
+    cantidad: 1, 
+    
+    preciounit: parseFloat(row['Importe Final'].replace(',', '.')),
+    preciototal: parseFloat(row['Importe Final'].replace(',', '.')),
+    cuerpoflowid: cuerpoflowid, // completar según necesidad
+    cuerpostatusid: statusId, // o el que corresponda
+  };
 
-       const articuloId = buscarArticuloId(articulos.rows, row.articulo);
-       const primerStock = articulosDeposito.rows.stock[0];
-       if (!primerStock) throw new Error("No hay stock disponible para este artículo");
-       const depositoId = primerStock.id;
-       //const depositoId = buscarArticuloDepositoId(articulosDeposito.rows, articuloId);
-          const cuerpoData = {
-            presupcabid: cabResponse.id,
-            articulo: row.articulo,
-            articulodepositoid: primerStock.id, // Usar el primer depósito disponible
-            cantidad: parseFloat(row.cantidad),
-            preciounit: parseFloat(row.preciounit),
-            preciototal: parseFloat(row.preciototal),
-            cuerpoflowid: parseInt(row.cuerpoflowid),
-            cuerpostatusid: parseInt(row.cuerpostatusid),
-          };
+  console.log("DEBUG: cuerpoData:", cuerpoData);
+  // Guardar cuerpo del registro
 
-          const cuerpoResponse = await saveRegistroCuerpo(cuerpoData, token);
-          console.log("Cuerpo guardado:", cuerpoResponse);
-        }
+  const cuerpoResponse = await saveRegistroCuerpo(cuerpoData, token);
+  console.log("Cuerpo guardado:", cuerpoResponse);
+}
+
 
         // Borrar archivo CSV temporal
         fs.unlinkSync(req.file.path);
